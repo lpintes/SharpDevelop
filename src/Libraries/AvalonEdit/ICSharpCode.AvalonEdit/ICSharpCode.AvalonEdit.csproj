@@ -325,6 +325,7 @@
     <Compile Include="TextEditorAutomationPeer.cs" />
     <Compile Include="TextEditorComponent.cs">
     </Compile>
+    <Compile Include="TextRange.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Document\DocumentChangeEventArgs.cs" />
     <Compile Include="Document\GapTextBuffer.cs">

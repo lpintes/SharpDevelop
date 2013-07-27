@@ -7,6 +7,8 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
@@ -55,6 +57,8 @@ namespace ICSharpCode.AvalonEdit
 			if (textArea == null)
 				throw new ArgumentNullException("textArea");
 			this.textArea = textArea;
+			textArea.TextEditor=this;
+			textArea.SelectionChanged+=(s, e)=>{ RaiseAutomationEvent(AutomationEvents.TextPatternOnTextSelectionChanged); };
 			
 			textArea.TextView.Services.AddService(typeof(TextEditor), this);
 			
@@ -69,12 +73,6 @@ namespace ICSharpCode.AvalonEdit
 		}
 		#endif
 		#endregion
-		
-		/// <inheritdoc/>
-		protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer()
-		{
-			return new TextEditorAutomationPeer(this);
-		}
 		
 		/// Forward focus to TextArea.
 		/// <inheritdoc/>
@@ -236,6 +234,13 @@ namespace ICSharpCode.AvalonEdit
 			return document;
 		}
 		
+			private void RaiseAutomationEvent(AutomationEvents eventId) {
+				if(AutomationPeer.ListenerExists(eventId)) {
+					var peer=UIElementAutomationPeer.CreatePeerForElement(this) as TextEditorAutomationPeer;
+if(peer!=null) peer.RaiseAutomationEvent(eventId);
+				}
+			}
+			
 		/// <summary>
 		/// Occurs when the Text property changes.
 		/// </summary>
@@ -249,6 +254,7 @@ namespace ICSharpCode.AvalonEdit
 			if (TextChanged != null) {
 				TextChanged(this, e);
 			}
+			RaiseAutomationEvent(AutomationEvents.TextPatternOnTextChanged);
 		}
 		#endregion
 		
