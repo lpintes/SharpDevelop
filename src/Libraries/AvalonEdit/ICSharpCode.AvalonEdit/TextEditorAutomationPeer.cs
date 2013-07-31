@@ -93,19 +93,22 @@ namespace ICSharpCode.AvalonEdit
 			int endOffset=startOffset+line.VisualLength;
 			return (ITextRangeProvider) new TextRange(TextEditor, startOffset, endOffset);
 		}
-		
+		/// <inheritdoc/>
 		protected override AutomationControlType GetAutomationControlTypeCore() {
 			return AutomationControlType.Document;
 		}
 		
+		/// <inheritdoc/>
 		protected override string GetClassNameCore() {
 			return "AvalonEdit";
 		}
 		
+		/// <inheritdoc/>
 		protected override bool HasKeyboardFocusCore() {
 			return TextEditor.TextArea.IsKeyboardFocusWithin;
 		}
 		
+		/// <inheritdoc/>
 		protected override bool IsKeyboardFocusableCore() {
 			return true;
 		}

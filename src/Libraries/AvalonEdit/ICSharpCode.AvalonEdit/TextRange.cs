@@ -1,10 +1,12 @@
 using System;
+using System.IO;
 using System.Diagnostics;
 using System.Linq;
 using System.Windows.Automation;
 using System.Windows.Automation.Provider;
 using System.Windows.Automation.Text;
 using System.Windows.Documents;
+
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Editing;
 using ICSharpCode.AvalonEdit.Rendering;
@@ -25,16 +27,15 @@ namespace ICSharpCode.AvalonEdit {
 				endOffset=x;
 			}
 			this.textEditor=textEditor;
-			this.rangeStart=CreateAnchor(startOffset, true);
-			this.rangeEnd=CreateAnchor(endOffset, false);
-			Debug.WriteLine("TextRange created.");
+			CreateAnchors(startOffset, endOffset);
+			Debug.WriteLine("TextRange created from offsets.");
 		}
 		
 		internal TextRange(TextEditor textEditor, TextAnchor rangeStart, TextAnchor rangeEnd) {
 			this.textEditor=textEditor;
 			this.rangeStart=rangeStart;
 			this.rangeEnd=rangeEnd;
-			Debug.WriteLine("TextRange created.");
+			Debug.WriteLine("TextRange created from anchors.");
 		}
 		
 		internal TextDocument Document {
@@ -49,90 +50,54 @@ namespace ICSharpCode.AvalonEdit {
 			get { return textEditor.TextArea.TextView; }
 		}
 		
-		internal TextAnchor CreateAnchor(int offset, bool startOfRange) {
-			TextAnchor result=Document.CreateAnchor(offset);
-			if(startOfRange) result.MovementType=AnchorMovementType.AfterInsertion;
-			else result.MovementType=AnchorMovementType.BeforeInsertion;
-			Debug.WriteLine("Anchor created at offset "+offset);
-			return result;
+		internal void CreateAnchors(int startOffset, int endOffset) {
+			rangeStart=Document.CreateAnchor(startOffset);
+			rangeStart.MovementType=AnchorMovementType.AfterInsertion;
+			rangeEnd=Document.CreateAnchor(endOffset);
+			rangeEnd.MovementType=AnchorMovementType.BeforeInsertion;
+			Debug.WriteLine("Range created at offsets "+startOffset+", "+ endOffset);
 		}
 		
-		internal void GetWordOffsets(ITextSource source, int offset, out int startOffset, out int endOffset) {
-			startOffset=endOffset=-1;
+		internal void GetUnitOffsets(TextUnit unit, ITextSource source, int offset, out int startOffset, out int endOffset) {
 			int textLength=source.TextLength;
-			if(offset<0 || offset>=textLength) return;
-			char ch=source.GetCharAt(offset);
-			CharacterClass c=TextUtilities.GetCharacterClass(ch);
-			if(c==CharacterClass.Other) {
-				startOffset=offset;
-				if(offset<textLength) endOffset=offset+1;
-				return;
-			}
-			
-		}
-		
-		internal TextAnchor FindUnitBoundary(TextUnit unit, int offset, LogicalDirection direction) {
-			CaretPositioningMode mode=CaretPositioningMode.Normal;
-			int rangeOffset=rangeStart.Offset;
-			bool startOfRange=(direction==LogicalDirection.Backward);
-			int textLength=Document.TextLength;
+			startOffset=endOffset=-1;
+			if(offset<0 || offset>=textLength-1) return;
 			switch(unit) {
 				case TextUnit.Character:
 				case TextUnit.Format:
-					if(startOfRange) return CreateAnchor(rangeOffset, true);
-					if(rangeOffset<textLength) rangeOffset++;
-					return CreateAnchor(rangeOffset,false);
+					startOffset=offset;
+					endOffset=offset+1;
+				break;
 				case TextUnit.Word:
-					CharacterClass c=TextUtilities.GetCharacterClass(Document.GetCharAt(rangeOffset));
-					if(c==CharacterClass.Other) {
-						if(startOfRange) return CreateAnchor(rangeOffset, true);
-						rangeOffset+=1;
-						if(rangeOffset>=textLength) rangeOffset=textLength;
-						return CreateAnchor(rangeOffset, false);
+					if(char.IsWhiteSpace(source.GetCharAt(offset))) {
+						startOffset=offset;
+						endOffset=offset+1;
 					}
 					else {
-						if(startOfRange) mode=CaretPositioningMode.WordStartOrSymbol;
-						else mode=CaretPositioningMode.WordBorderOrSymbol;
-						int temp=TextUtilities.GetNextCaretPosition(Document, rangeOffset, direction, mode);
-						if(temp!=-1) rangeOffset=temp;
-						return CreateAnchor(rangeOffset, startOfRange);
+						endOffset=TextUtilities.GetNextCaretPosition(source, offset, LogicalDirection.Forward, CaretPositioningMode.WordStartOrSymbol);
+						startOffset=TextUtilities.GetNextCaretPosition(source, endOffset, LogicalDirection.Backward, CaretPositioningMode.WordStartOrSymbol);
 					}
+				break;
 				case TextUnit.Line:
 					VisualLine line=TextView.GetOrConstructVisualLine(Document.GetLineByOffset(offset));
-					rangeOffset=line.StartOffset;
-					if(!startOfRange) rangeOffset+=line.VisualLengthWithEndOfLineMarker+1;
-					return CreateAnchor(rangeOffset, startOfRange);
+					startOffset=line.StartOffset;
+					endOffset=startOffset+line.VisualLengthWithEndOfLineMarker+1;
+				break;
 				case TextUnit.Paragraph:
 					DocumentLine dline=Document.GetLineByOffset(offset);
-					if(startOfRange) rangeOffset=dline.Offset;
-					else rangeOffset=dline.EndOffset+dline.DelimiterLength;
-					return CreateAnchor(rangeOffset, startOfRange);
+					startOffset=dline.Offset;
+					endOffset=dline.EndOffset+dline.DelimiterLength;
+				break;
 				case TextUnit.Page:
 				case TextUnit.Document:
-					rangeOffset=(startOfRange ? 0 : Document.TextLength);
-					return CreateAnchor(rangeOffset, startOfRange);
+					startOffset=0;
+					endOffset=textLength;
+				break;
 			}
-			return rangeStart;
+			if(startOffset==-1) startOffset=0;
+			if(endOffset==-1) endOffset=textLength;
 		}
 		
-		internal int MoveBoundaryByUnit(ref TextAnchor boundary, TextUnit unit, int count) {
-			if(count==0) return 0;
-			LogicalDirection direction=(count<0 ? LogicalDirection.Backward : LogicalDirection.Forward);
-			int textLength=Document.TextLength;
-			int result=0;
-			int delta=0;
-			if(unit==TextUnit.Line) delta=1;
-			if(direction==LogicalDirection.Backward) delta=-delta;
-			boundary=FindUnitBoundary(unit, boundary.Offset, LogicalDirection.Backward);
-			count=Math.Abs(count);
-			for(int i=0; i<count; i++) {
-				boundary=FindUnitBoundary(unit, boundary.Offset+delta, direction);
-				int offset=boundary.Offset;
-				if(offset<=0 || offset>=textLength) break;
-				result++;
-			}
-			return result;
-		}
 		
 		ITextRangeProvider ITextRangeProvider.Clone() {
 			return (ITextRangeProvider)new TextRange(textEditor, rangeStart, rangeEnd);
@@ -154,15 +119,31 @@ namespace ICSharpCode.AvalonEdit {
 		}
 		
 		void ITextRangeProvider.ExpandToEnclosingUnit(TextUnit unit) {
-			int offset=rangeStart.Offset;
-			rangeStart=FindUnitBoundary(unit, offset, LogicalDirection.Backward);
-			rangeEnd=FindUnitBoundary(unit, offset, LogicalDirection.Forward);
+			int startOffset=-1, endOffset;
+			GetUnitOffsets(unit, Document, rangeStart.Offset, out startOffset, out endOffset);
+			CreateAnchors(startOffset, endOffset);
+		}
+		
+		internal int MoveOffsetByUnit(TextUnit unit, int count, ref int offset) {
+			int startOffset, endOffset;
+			int result=0;
+			int textLength=Document.TextLength;
+			GetUnitOffsets(unit, Document, offset, out startOffset, out endOffset);
+			for(int i=0; i<Math.Abs(count); i++) {
+				if(count<0) offset=startOffset-1;
+				else offset=endOffset;
+				GetUnitOffsets(unit, Document, offset, out startOffset, out endOffset);
+				if(startOffset==0 || endOffset==textLength) break;
+				result++;
+			}
+			return result;
 		}
 		
 		int ITextRangeProvider.Move(TextUnit unit, int count) {
-			rangeStart=FindUnitBoundary(unit, rangeStart.Offset, LogicalDirection.Backward);
-			int result=MoveBoundaryByUnit(ref rangeStart, unit, count);
-			rangeEnd=FindUnitBoundary(unit, rangeStart.Offset, LogicalDirection.Forward);
+			int startOffset=rangeStart.Offset, endOffset=-1;
+			int result=MoveOffsetByUnit(unit, count, ref startOffset);
+			GetUnitOffsets(unit, Document, startOffset, out startOffset, out endOffset);
+			CreateAnchors(startOffset, endOffset);
 			return result;
 		}
 		
@@ -181,13 +162,17 @@ namespace ICSharpCode.AvalonEdit {
 		}
 		
 		int ITextRangeProvider.MoveEndpointByUnit(TextPatternRangeEndpoint endpoint, TextUnit unit, int count) {
-			TextAnchor boundary=(endpoint==TextPatternRangeEndpoint.Start ? rangeStart : rangeEnd);
-			int result=MoveBoundaryByUnit(ref boundary, unit, count);
-			if(rangeStart.Offset>rangeEnd.Offset) {
-				TextAnchor a=rangeStart;
-				rangeStart=rangeEnd;
-				rangeEnd=a;
+			TextAnchor ep1, ep2;
+			ep1=(endpoint==TextPatternRangeEndpoint.Start ? rangeStart : rangeEnd);
+			ep2=(ep1==rangeStart ? rangeEnd : rangeStart);
+			int startOffset=ep1.Offset, endOffset;
+			int result=MoveOffsetByUnit(unit, count, ref startOffset);
+			if(startOffset<ep2.Offset) endOffset=ep2.Offset;
+			else {
+				endOffset=startOffset;
+				startOffset=ep2.Offset;
 			}
+			CreateAnchors(startOffset, endOffset);
 			return result;
 		}
 		
